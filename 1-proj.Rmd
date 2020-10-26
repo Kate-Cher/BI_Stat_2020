@@ -12,10 +12,10 @@ output:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-library(ggplot2)
-library(dplyr)
-library(DMwR)
-library(car)
+require(ggplot2)
+require(dplyr)
+require(DMwR)
+require(car)
 ```
 
 # Getting data from different files
@@ -38,7 +38,7 @@ clam_old <- function(path_name) {
 
 ```{r function}
 
-file_path <- "C:/Users/Катюша/Desktop/учеба/r-stat/Data"
+file_path <- "<path>"
 clam_old(file_path)
 str(working_df)
 ```
@@ -162,7 +162,8 @@ According to the data structure I suppose that "Length" and "Diameter" are inter
 ggplot(working_df2, aes(Length, Diameter), na.rm = T) +
   geom_point(aes(color = factor(Sex))) +
   geom_smooth(method = lm) + 
-  labs(title = "Relationship between clam's diameter and length")
+  labs(title = "Relationship between clam's diameter and length") + 
+   scale_color_discrete(name = "Sex", labels = c("male", "female", "uvenil"))
 
 ```
 
@@ -309,4 +310,24 @@ potentiated equation: Whole weight = `r v$coefficients[1]`*Diameter^`r v$coeffic
 
 As we suppose total weigth is proportional to the diameter in `r v$coefficients[2]` degree (which is a little less then 3)
 
+# Differences in size depending on the number of rings
 
+Let's check the hypothesis that the number of rings depends on age.
+
+```{r, echo = F, warning = F, errors = F, message=F, results="hide"}
+working_df1 <-  mutate(working_df1, fac_sex = ifelse(Sex == 3, 0, 1))
+working_df1 %>% group_by(fac_sex) 
+```
+
+Mean clam's number of rings for uvenils is `r mean(working_df1$Rings[working_df1$fac_sex == 0], na.rm =T)` and mean for adults is `r mean(working_df1$Rings[working_df1$fac_sex == 1], na.rm =T)`.
+
+```{r, echo = F, warning = F, errors = F, message=F, results="hide"}
+working_df6 <- na.omit(working_df1)
+ggplot(working_df6, aes(x = as.factor(fac_sex), y = Rings))+
+  stat_summary(fun.data = mean_cl_boot, geom = "pointrange") + 
+  labs(title = "Confidence interval for number of rings mean vs age") + 
+  scale_x_discrete(name = "Age", labels = c("Uvenil", "Adult"))      
+```
+
+Since the average number of rings for uvenils does not fall within the confidence interval for the average number of rings in adults and vice versa, the confidence interval for the average number of rings in adults does not fall within the confidence interval for the average number of rings in uvenils, we conclude that the differences are statistically significant. 
+This means that the number of rings really depends on age
