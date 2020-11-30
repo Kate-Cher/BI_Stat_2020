@@ -255,7 +255,7 @@ drop1(mod_8, test = "F")
 coef <- mod_8$coefficients
 ```
 
-```{r,  echo=FALSE, warning=FALSE, error = FALSE, message=FALSE, results="hide"}
+```{r,  echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
 summary(mod_8)
 ```
 
@@ -295,7 +295,65 @@ plot_grid(res_1, res_2,  nrow = 1)
 plot_grid(res_3, res_5, nrow = 1)
 ```
 
-As we can see, new residuals are powerful now. We can conclude that there is no reason trying to optimeze this model again. 
+# Final model
 
-Since there is no simple observable linear relationship in the data, we cannot build an optimal adequate model.
-Other methods can be used to parse this dataset, such as the principal component analysis for example.
+As we remember from EDA lstat var is not linear so we can use squared lstat for better fit.
+
+That is our final model:
+
+```{r,  echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+mod_8 <- lm(medv~.-age-indus+I(lstat^2) - rad,data=df_scale)
+summary(mod_8)
+```
+
+R-squared and adjusted R-squared are bigger then in previous model.
+
+But still we need to diagnoste it.
+
+```{r,  echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+mod_8_diag <- data.frame(fortify(mod_8), df_scale[, c(2:4, 8, 14)])
+
+gg_resid <- ggplot(data = mod_8_diag, aes(x = .fitted, y = .stdresid)) + 
+  geom_point() + 
+  geom_smooth(method = "lm") +
+  geom_hline(yintercept = 0) +
+  geom_hline(yintercept = 2, color = "red") +
+  geom_hline(yintercept = -2, color = "red") +
+  labs(title = "Distribution of residues", x = "Fitted resid.", y = "Standart. resid.")
+
+plot1 <- ggplot(mod_8_diag, aes(x = 1:nrow(mod_8_diag), y = .cooksd)) + 
+  geom_bar(stat = "identity") + 
+  geom_hline(yintercept = 2, color = "red") + 
+  labs(title = "Cook's distance graph", x = "Observations", y = "Cook's dist.")
+plot2 <- qqPlot(mod_8$residuals)
+plot2 <- ggplot(mod_8, aes(sample=mod$residuals))+stat_qq() + labs(title = "Distribution (quantile-quantile plot)")
+plot_grid(gg_resid, plot1)
+```
+
+Now distribution of residuals looks better. And quantile-quantile plot too.
+
+Nice.
+
+```{r,  echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+
+res_1 <- gg_resid + aes(x = zn)
+res_2 <- gg_resid + aes(x = indus)
+res_3 <- gg_resid + aes(x = nox)
+res_5 <- gg_resid + aes(x = tax)
+plot_grid(res_1, res_2,  nrow = 1)
+plot_grid(res_3, res_5, nrow = 1)
+```
+
+Also residuals distributions of the out of the model predictors are quite good now.
+
+# Conclusion
+
+We can conclude that there is no reason trying to optimize this model again. 
+
+Since there is no simple observable linear relationship in the data, we cannot build an optimal adequate and good model.
+
+Despite the fact that we have selected a good model compared to the previous ones, we consider it is dangerous to make predictions of the houses costs based on it because of the possibility of obtaining incorrect results. 
+
+That is why we did not built a graf of the predictions of the medv value.
+
+But other methods still can be used to parse this dataset, such as the principal component analysis for example.
