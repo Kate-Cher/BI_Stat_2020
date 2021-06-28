@@ -1,0 +1,280 @@
+---
+title: "Project №5. Log regression"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_section: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(survival)
+library(survminer)
+library(ranger)
+library(ggplot2)
+library(dplyr)
+library(ggfortify)
+library(coin)
+library(cowplot)
+library(corrplot)
+library(car)
+library(ROCR)
+library(knitr)
+```
+
+# Brief exploratory data analysis
+
+A brief exploratory analysis of the data was carried out in order to identify some missing values in our data, find errors in values.
+
+```{r echo=FALSE, warning=FALSE}
+df <- read.csv("D:/загрузки/binary (1).csv")
+kable(head(df))
+
+```
+
+We visualized possible outliers in a futime variable. As you can see on the graph there are no strong outliers. 
+
+```{r echo=FALSE, warning=FALSE}
+
+plt1 <- ggplot(df, aes(as.factor(admit), gre), na.rm = T) + 
+  geom_boxplot() + 
+  labs(title = "Outliers of Graduate Record Exam scores.", x = "Admission", y = "Exam scores") + 
+  scale_x_discrete(labels = c("0" = "Not admit", "1" = "Admit"))
+
+plt2 <- ggplot(df, aes(as.factor(admit), gpa), na.rm = T) + 
+  geom_boxplot() + 
+  labs(title = "Outliers of grade point average.", x = "Admission", y = "grade point average") + 
+  scale_x_discrete(labels = c("0" = "Not admit", "1" = "Admit"))
+
+plt3 <- ggplot(df, aes(as.factor(rank), gre), na.rm = T) + 
+  geom_boxplot() + 
+  labs( x = "Rank", y = "Exam score") 
+
+plt4 <- ggplot(df, aes(as.factor(rank), gpa), na.rm = T) + 
+  geom_boxplot() + 
+  labs( x = "Rank", y = "grade point average") 
+  
+plot_grid( plt1, plt2, plt3, plt4)
+
+```
+
+As we're going to build a log regression model, it's better to get rid of outliers.
+We removed observations N: `r which.min(df$gpa)`, `r which.min(df$gre)`, `r which.min(df[-c(which.min(df$gre)),]$gre)`
+
+```{r echo=FALSE, warning=FALSE}
+df <- df[-c(which.min(df$gpa)),]
+df <- df[-c(which.min(df$gre)),]
+df <- df[-c(which.min(df$gre)),]
+```
+
+There are 397 observations in our dataframe now and `r sum(complete.cases(df))` of them are full (without NA).
+
+Also make all binary variables factorial.
+So dataframe structure is following:
+
+```{r echo=FALSE, warning=FALSE}
+df$admit <- as.factor(df$admit)
+df$rank <- as.factor(df$rank)
+str(df)
+```
+
+After that we visualized the possibility of admission depending on other variables:
+
+```{r echo=FALSE, warning=FALSE}
+levels(df$admit) <- c("Don't admit", "Admit")
+ggplot(df, aes(gre, gpa, col = rank))+
+  geom_point()+
+  facet_grid(.~admit)+
+  theme(axis.text=element_text(),
+        axis.title=element_text(face="bold"))
+```
+
+# Building the model
+
+We can now build a model
+
+```{r echo=FALSE, warning=FALSE}
+mod <- glm(admit ~ ., family = binomial(link = 'logit'), data = df)
+Anova(mod)
+# drop1(mod, test = "Chi")
+```
+
+As we can see, all predictors in our model are significant. 
+
+So *final model* is the following:
+
+admit = `r exp(mod$coefficients)[1]` + gre * `r exp(mod$coefficients)[3]` + 
+gpa * `r exp(mod$coefficients)[3]` + rank2 *`r exp(mod$coefficients)[4]`
+ + rank3 * `r exp(mod$coefficients)[5]` + rank4 * `r exp(mod$coefficients)[6]`
+
+
+# Model diagnostics
+
+After that, we diagnosed the limits of applicability of our model 
+
+## Linearity
+
+It is quite fine.
+
+```{r echo=FALSE, warning=FALSE, results="hyde", message=FALSE}
+mod_diag <- data.frame(.fitted = fitted(mod, type = 'response'),
+                        .resid_p = resid(mod, type = 'pearson'))
+
+ggplot(mod_diag, aes(y = .resid_p, x = .fitted)) + 
+  geom_point() +
+  theme_bw() +
+  geom_hline(yintercept = 0) +  
+  geom_smooth(method = 'loess')
+```
+
+## Superdispersion
+
+We checked the data for superdispersion using the author's function. Everything is fine
+
+```{r echo=FALSE, warning=FALSE}
+overdisp_fun <- function(model) {
+  rdf <- df.residual(model)  # Число степеней свободы N - p
+  if (any(class(model) == 'negbin')) rdf <- rdf - 1 ## учитываем k в NegBin GLMM
+  rp <- residuals(model,type='pearson') # Пирсоновские остатки
+  Pearson.chisq <- sum(rp^2) # Сумма квадратов остатков, подчиняется Хи-квадрат распределению
+  prat <- Pearson.chisq/rdf  # Отношение суммы квадратов остатков к числу степеней свободы
+  pval <- pchisq(Pearson.chisq, df=rdf, lower.tail=FALSE) # Уровень значимости
+  c(chisq=Pearson.chisq,ratio=prat,rdf=rdf,p=pval)        # Вывод результатов
+}
+
+overdisp_fun(mod)
+```
+
+## Multicollinearity
+
+Also we've checked multicollinearity and we see a weak correlation between the variables fre and gpa. However everything is fine.
+
+```{r echo=FALSE, warning=FALSE}
+df1 <- df
+df1$admit <- as.numeric(df$admit)
+df1$rank <- as.numeric(df1$rank)
+corr_matrix<-cor(df1)
+corrplot(corr_matrix, type="upper", title = "Correlations")
+```
+
+# Model predictions
+
+We checked the possibility of building such a model, now we can try to make predictions based on it. 
+
+We calculated the probability of admission based on the independent variables and append new variable "predicted" to our dataframe which means probability of admission based on our model.
+
+```{r echo=FALSE, warning=FALSE}
+# summary(mod)
+df$predicted <- predict(object = mod, type = "response")
+head(df)
+```
+
+We visualised ROC-curve to evaluate our model 
+
+```{r echo=FALSE, warning=FALSE}
+pred_fit <- prediction(df$predicted, df$admit)
+pred_fit <- performance(pred_fit, "tpr", "fpr")
+plot(pred_fit, colorize = T, print.cutoffs.at = seq(0, 1, by = 0.1))
+```
+
+After that, we calculated and visualized the limit separating admission from non-admission. As it showm on the plot it turned out to be equal to 0.32.
+
+```{r echo=FALSE, warning=FALSE}
+pred_fit <- prediction(df$predicted, df$admit)
+a = performance(pred_fit, x.measure = "cutoff", measure = "spec")
+b = performance(pred_fit, x.measure = "cutoff", measure = "sens")
+c = performance(pred_fit, x.measure = "cutoff", measure = "acc")
+plot(a, col = "blue", lwd = 2)
+plot(add = T, b, col = "green", lwd = 2)
+plot(add=T, c, lwd =2)
+legend(x = 0.6,y = 0.3, c("spec", "sens", "accur"), 
+       lty = 1, col =c('green', 'blue', 'black'), bty = 'n', cex = 1, lwd = 2)
+
+abline(v= 0.32, lwd = 2)
+```
+
+And also we visualized correctness of our predictions. As we can see it's not really good. And The percentage of correctly predicted values is `r mean(df$correct)`. That is not really good as well.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+df$pred_resp  <- factor(ifelse(df$predicted > 0.32, 1, 0), labels = c("Don't admit", "Admit"))
+
+df$correct  <- ifelse(df$pred_resp == df$admit, 1, 0)
+
+ggplot(df, aes(predicted, fill = factor(correct)))+
+  geom_dotplot()+
+  theme(axis.text=element_text(),
+        axis.title=element_text(face="bold"))
+
+```
+
+## Using model on test dataset
+
+Finally we've create an artificial dataset with 100 observations (25 per rank). The values of gpa predictor is be equal to its mean, and for the gre predictor values are from the minimum to the maximum for the sample. 
+
+```{r echo=FALSE, warning=FALSE}
+new_data <- df %>% group_by(rank) %>%
+  do(data.frame(gre = seq(from = min(.$gre), to = max(.$gre), length.out = 25), gpa = mean(.$gpa)))
+new_data1 <- new_data
+new_data1$admit <- "NA"
+kable(head(new_data))
+```
+
+```{r echo=FALSE, warning=FALSE}
+new_data1$admit  <- predict(mod, newdata = new_data1, type = "response")
+new_data1$pred_resp  <- factor(ifelse(new_data1$admit > 0.32, 1, 0), labels = c("Don't admit", "Admit"))
+
+```
+
+## Visualising predictions
+
+### Predictions at the scale of the link function
+
+```{r echo=FALSE, warning=FALSE}
+
+X <- model.matrix(~ gre + gpa + rank, data = new_data)
+b <- coef(mod)
+
+new_data$fit_eta <- X %*% b
+new_data$se_eta <- sqrt(diag(X %*% vcov(mod) %*% t(X)))
+
+logit_back <- function(x) exp(x)/(1 + exp(x))
+new_data$fit_pi <- logit_back(new_data$fit_eta)
+new_data$lwr_pi <- logit_back(new_data$fit_eta - 2 * new_data$se_eta)
+new_data$upr_pi <- logit_back(new_data$fit_eta + 2 * new_data$se_eta)
+#new_data$old_gre <- GRE
+
+# head(new_data, 2)
+
+ggplot(new_data, aes(x = gre, y = fit_eta, fill = rank))  + 
+  geom_line(aes(color = rank)) +
+  geom_ribbon(aes(ymin = fit_eta - 2 * se_eta, ymax = fit_eta + 2 * se_eta), alpha = 0.5)+
+  theme_bw() + 
+  labs(title = "Admission probability")
+
+```
+
+### Plot of Predictions at Response Scale 
+
+```{r echo=FALSE, warning=FALSE}
+ggplot(new_data, aes(x = gre, y = fit_pi, fill = rank)) +
+  geom_ribbon(aes(ymin = lwr_pi, ymax = upr_pi), alpha = 0.5) +
+  geom_line(aes(color = rank)) +
+  labs(y='Probability', x = 'Standardised gre', title = 'Admission probability') +
+  theme_bw()
+```
+
+### Test dataset observation classification
+
+```{r echo=FALSE, warning=FALSE}
+levels(new_data1$pred_resp) <- c("Don't admit", "Admit")
+ggplot(new_data1, aes(gre, gpa, col = rank))+
+  geom_point()+
+  facet_grid(.~pred_resp)+
+  theme(axis.text=element_text(),
+        axis.title=element_text(face="bold"))
+```
+
+
+As we can see all graduation exam scores and school rank significantly determine admission.
