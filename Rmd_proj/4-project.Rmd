@@ -1,0 +1,186 @@
+---
+title: "Project №4"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_section: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(survival)
+library(survminer)
+library(ranger)
+library(ggplot2)
+library(dplyr)
+library(ggfortify)
+library(coin)
+library(cowplot)
+```
+
+# Brief exploratory data analysis
+
+A brief exploratory analysis of the data was carried out in order to identify some missing values in our data, find errors in values.
+
+```{r echo=FALSE, warning=FALSE}
+df <- ovarian
+head(df)
+```
+
+We visualized possible outliers in a futime variable. As you can see on the graph there are no strong outliers. 
+
+```{r echo=FALSE, warning=FALSE}
+
+ggplot(df, aes(as.factor(rx), futime), na.rm = T) + 
+  geom_boxplot() + 
+  labs(title = "Outliers of survival or censoring time.", x = "Treatment group", y = "Time") 
+
+```
+
+It may also be helpful to estimate the minimum and maximum age of the patients so that there are no inadequate values. 
+
+So age of the oldest patient `r max(df$age)` and the youungest patient is `r min(df$age)` years old. Age within normal limits.
+
+There are 26 observations in our dataframe and `r sum(complete.cases(df))` of them are full (without NA).
+
+In addition, we expect that the average time for censored and uncensored cases should differ. We visualize it 
+
+```{r echo=FALSE, warning=FALSE}
+
+ggplot(df, aes(as.factor(fustat), futime), na.rm = T) + 
+  geom_boxplot() + 
+  labs(title = "Differences in censoring status", x = "censoring status", y = "Time") 
+
+```
+
+As we can see mean time differs depending on censoring status.
+
+# Kaplan-Meier curves
+
+We built a survival curve based on the whole model
+
+```{r echo=FALSE, warning=FALSE}
+km <- with(df, Surv(futime, fustat))
+# head(km,80)
+km_fit <- survfit(Surv(futime, fustat) ~ 1, data=df)
+# summary(km_fit, times = c(1,30,60,90*(1:10)))
+plot <- autoplot(km_fit)
+
+plot <- plot + 
+  ggtitle("Full model based Survival") +
+  labs(x = "Time", y = "Survival Probability")
+plot
+```
+
+After that, we analyzed how the individual factors dividing patients into groups affect their survival.
+
+```{r echo=FALSE, warning=FALSE}
+km_trt_fit <- survfit(Surv(futime, fustat) ~ ecog.ps, data=df)
+ecog_plot <- autoplot(km_trt_fit)
+
+ecog_plot <- ecog_plot + 
+  ggtitle("ECOG performance based Survival") +
+  labs(x = "Time", y = "Survival Probability") +
+  guides(fill=FALSE) +
+  labs(colour = "Perf. status")
+#ecog_plot
+```
+
+```{r echo=FALSE, warning=FALSE}
+km_trt_fit <- survfit(Surv(futime, fustat) ~ rx, data=df)
+rx_plot <- autoplot(km_trt_fit)
+
+rx_plot <- rx_plot + 
+  ggtitle("Treatment based Survival") +
+  labs(x = "Time", y = "Survival Probability") +
+  guides(fill=FALSE) +
+  labs(colour = "Treatment") 
+#rx_plot
+
+```
+
+```{r echo=FALSE, warning=FALSE}
+km_trt_fit <- survfit(Surv(futime, fustat) ~ resid.ds, data=df)
+resid_plot <- autoplot(km_trt_fit)
+
+resid_plot <- resid_plot + 
+  ggtitle("Residual disease based Survival") +
+  labs(x = "Time", y = "Survival Probability") +
+  guides(fill=FALSE) +
+  labs(colour = "Disease") +
+  scale_color_manual(labels = c("No", "Yes"), values = c(1, 2))
+#resid_plot
+```
+
+```{r echo=FALSE, warning=FALSE}
+old_p <- mutate(df, AG = ifelse((age < 55), "<55", ">55"),
+              AG = factor(AG))
+
+km_AG_fit <- survfit(Surv(futime, fustat) ~ AG, data=old_p)
+age_plot <- autoplot(km_AG_fit)
+
+age_plot <- age_plot + 
+  ggtitle("Patients's age based Survival") +
+  labs(x = "Time", y = "Survival Probability") +
+  guides(fill=FALSE) +
+  labs(colour = "Age")
+#age_plot
+```
+
+```{r echo=FALSE, warning=FALSE}
+plot_grid(age_plot, rx_plot, resid_plot, ecog_plot)
+```
+
+We can see that the groups differ in terms of survival among themselves, but so far we cannot conclude the significance of these differences
+
+# Log-rank tests
+
+We ran log rank tests to assess the significance of the differences in our groups
+
+```{r echo=FALSE, warning=FALSE}
+
+logrank_test(Surv(futime, fustat) ~ as.factor(rx), data = df)
+logrank_test(Surv(futime, fustat) ~ as.factor(resid.ds), data = df)
+logrank_test(Surv(futime, fustat) ~ as.factor(AG), data = old_p)
+logrank_test(Surv(futime, fustat) ~ as.factor(ecog.ps), data = df)
+
+```
+
+As we can see, there are significant differences only in the age group (more or less than 55)
+
+# Analysis of factors influencing the risk (Cox model)
+
+We built Cox model to assess the factors influencing the risk
+
+```{r, echo=FALSE, message= FALSE}
+df <- mutate(df, as.factor(resid.ds))
+cox <- coxph(Surv(futime, fustat) ~rx + AG + resid.ds + ecog.ps , data = old_p)
+summary(cox)
+cox1 <- coxph(Surv(futime, fustat) ~rx + age + resid.ds + ecog.ps , data = old_p)
+```
+
+As we can see treatment group and age factors are significant. 
+
+Nevertheless, it is necessary to check how these factors relate to each other and to the remaining variables.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+aa_fit <- aareg(Surv(futime, fustat) ~rx + age + resid.ds + ecog.ps , data = old_p)
+autoplot(aa_fit)
+```
+
+According to the graph, we can assume that age is associated with the appearance of residual diseases (which is quite logical from a biological point of view). However, age and treatment factors are not related. accordingly they pose a risk (for patients divided into two groups >55 and <55 years old)
+
+```{r, echo=FALSE, message= FALSE}
+ggforest(cox, data = old_p)
+```
+
+According to the graph, we estimated that the chance of an earlier death in patients from group >55 is 85% higher than in group <55. And chance of an earlier death in patients from 1st treatment group is 22% higher than in second group.
+
+However, it is important to note that if all patients are not divided into two groups by age, then the only significant factor will remain the age itself. The Cox model will be the following
+
+```{r, echo=FALSE, message= FALSE}
+cox1 <- coxph(Surv(futime, fustat) ~rx + age + resid.ds + ecog.ps , data = old_p)
+cox1
+```

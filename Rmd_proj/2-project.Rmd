@@ -1,0 +1,359 @@
+---
+title: "Project 2"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_section: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(psych)
+library(car)
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+library(MASS)
+library(ggpubr)
+library(tidyr)
+library(cowplot)
+library(corrplot)
+library(knitr)
+theme_set(theme_bw())
+```
+# Linear models
+
+In this project we tried to evaluate how average the value of the houses occupied owners, depends on various factors.
+
+## Breif EDA
+
+Perform exploratory data analysis, look at the data structure and outliers.
+
+```{r, echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+df <- Boston
+str(df)
+```
+
+There is no NA values in this dataset.
+
+We paid attention to two variables of type int, perhaps we should return them as factors.
+
+We looked at the graph of dependence of medv on these variables and noted that they are discrete, so they can be turned into factors.
+
+```{r, echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+plt <- ggplot(data = df, aes(y = medv)) + geom_point() 
+pl1 <- plt + aes(x = chas)
+pl2 <- plt + aes(x = rad)
+plot_grid(pl1, pl2,ncol = 2)
+```
+
+### Outliers visualisation.
+
+```{r, echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+df_long <- gather(df)
+outliers <- ggplot(df_long, aes(key, value)) + geom_boxplot() + ggtitle("Outliers") + labs(x = "Variables", y = "Values")
+outliers
+
+```
+
+### Data standartisation
+
+We pointed that variables scales are really different, so we applied data standardization. 
+
+```{r, echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+df_scale <- as.data.frame(sapply(df[,c(1, 2, 3, 5:8, 10:14)], scale))
+df2 <- as.data.frame(sapply(df[,c(1, 2, 3, 5:14)], scale))
+df2 $chas <- as.factor(df$chas) 
+df_scale$chas <- as.factor(df$chas)
+df_scale$rad <- as.factor(df$rad)
+df_long_scaled <- gather(df_scale[, c(1:12)])
+outliers <- ggplot(df_long_scaled, aes(key, value)) + geom_boxplot() + labs(x = "Variables", y = "Values", title = "Outliers of scaled dataset")
+outliers
+```
+
+## Linear model
+
+Build a linear model
+
+```{r, echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+mod <- lm(medv ~ ., df_scale)
+summary(mod)
+mod_diag <- fortify(mod)
+
+```
+
+
+## Model Diagnostics
+
+We checked the applicability conditions of our model and found some problems.
+
+### Checking the linearity of the relationship
+
+```{r, echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+linearity <- ggplot(df_scale, aes(y = medv)) + geom_point() + geom_smooth(se = FALSE) 
+crim_p <- linearity + aes(x = crim)
+zn_p <- linearity + aes(x = zn)
+indus_p <- linearity + aes(x = indus)
+nox_p <- linearity + aes(x = nox)
+rm_p <- linearity + aes(x = rm)
+age_p <- linearity + aes(x = age)
+dis_p <- linearity + aes(x = dis)
+tax_p <- linearity + aes(x = tax)
+ptratio_p <- linearity + aes(x = ptratio)
+black_p <- linearity + aes(x = black)
+lstat_p <- linearity + aes(x = lstat)
+plot_grid(crim_p, zn_p, indus_p, nox_p, rm_p, age_p, dis_p, tax_p, ptratio_p, black_p, lstat_p, ncol = 4)
+```
+
+The graph shows the nonlinearity of the relationship (for example lstat, crim, dis variables).
+
+### Influential observations and residues distribution checking
+
+```{r, echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+gg_resid <- ggplot(data = mod_diag, aes(x = .fitted, y = .stdresid)) + 
+  geom_point() + 
+  geom_smooth(method = "lm") +
+  geom_hline(yintercept = 0) +
+  geom_hline(yintercept = 2, color = "red") +
+  geom_hline(yintercept = -2, color = "red") +
+  labs(title = "Distribution of residues", x = "Fitted resid.", y = "Standart. resid.")
+
+plot1 <- ggplot(mod_diag, aes(x = 1:nrow(mod_diag), y = .cooksd)) + 
+  geom_bar(stat = "identity") + 
+  geom_hline(yintercept = 2, color = "red") + 
+  labs(title = "Cook's distance graph", x = "Observations", y = "Cook's dist.")
+# plot2 <- qqPlot(mod$residuals)
+plot2 <- ggplot(mod, aes(sample=mod$residuals))+stat_qq() + labs(title = "Distribution (quantile-quantile plot)")
+plot_grid(gg_resid, plot1, plot2)
+
+```
+
+The first graph shows that the residues are unevenly distributed. We can see dispersion heteroskedasticity.
+Also here we can notice nonlinearity of relationship as not all observations are in the +/- 2 standard deviation zone. In addition, the residuals are unevenly distributed, we  conclude that the variables are not independent.
+
+Cook's distance graph shows that there is no influential observations.
+
+Distribution graf shows that residual's distribution differs from normal.
+
+### Multicollinearity check
+```{r,  echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+corr_matrix<-cor(df)
+corrplot(corr_matrix, type="upper", title = "Correlations")
+vi <- vif(mod_1)
+
+```
+
+```{r,  echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+kable(vif(mod)[, c(1:2)])
+```
+
+As though variance inflation factor of some variables is higher then 2, we conclude that there is multicollinearity in our data. The same thing we can see in correlations plot.
+
+### predicting houses costs depending on the variable with the highest coefficient
+
+From the model summary we conclude that rad variable (index of accessibility to radial highways) has the highest estimate. Sinse rad is the factor variable in our model prediction of house costs (depending on 24 level of rad) is not informative. So we constructed graf of a value predictions of a variable that has the next largest modulo coefficient (lstat)
+
+```{r,  echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+df_scale_24 <- df[(df$rad == 24),]
+MyData <- data.frame(
+  lstat = seq(min(df_scale_24$lstat), max(df_scale_24$lstat), length.out = 132), crim = 0, zn = 0, indus = 0, nox = 0, rm = 0, age = 0, dis = 0, tax = 0, ptratio = 0, black = 0, mad = 0, chas = df_scale$chas[(df$rad == 24)], rad = as.factor(24))
+Predictions <- predict(mod, newdata = MyData,  interval = 'confidence')
+MyData <- data.frame(MyData, Predictions)
+
+Pl_predict <- ggplot(MyData, aes(x = lstat, y = fit)) +
+  geom_ribbon(alpha = 0.2, aes(ymin = lwr, ymax = upr)) +
+  geom_line() + 
+  ggtitle("lstat predictions for 24 rad level")
+Pl_predict 
+```
+
+Since the applicability conditions are not met in the model, this graph is not informative.
+
+## Conclusions of the model quality
+
+During the analysis we've showed that practically all the conditions of applicability are not performed. Unfortunately, such a model cannot be subjective.
+
+So we decided to try to improve quality of this model.
+
+# Improving model quality 
+
+Since we want to understand what the cost of houses depends on, we need to build a valid linear model so that it is possible to predict the cost depending on various conditions.
+
+```{r,  echo=FALSE, warning=FALSE, error = FALSE, message=FALSE , results="hide"}
+vif(mod)
+mod_2 <- update(mod, .~. - rad)
+vif(mod_2)
+mod_3 <- update(mod_2, .~. - dis)
+vif(mod_3)
+mod_4 <- update(mod_3, .~. - nox)
+vif(mod_4)
+mod_5 <- update(mod_4, .~. - indus)
+vif(mod_5)
+mod_6 <- update(mod_5, .~. - lstat)
+vif(mod_6)
+mod_7 <- update(mod_6, .~. - tax)
+vif(mod_7)
+drop1(mod_7, test = "F")
+mod_8 <- update(mod_7, .~. - zn)
+drop1(mod_8, test = "F")
+
+```
+
+We remove predictors from the model one by one depending on the vif value (first the largest one, until all vifs in the model are less than 2). Now the model is following
+
+```{r,  echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+summary(mod_8)
+```
+The model is optimized. Now it is necessary to re-diagnose it.
+
+```{r,  echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+mod_8_diag <- data.frame(fortify(mod_8), df_scale[, c(2:4, 7,8,11,14)])
+
+gg_resid <- ggplot(data = mod_8_diag, aes(x = .fitted, y = .stdresid)) + 
+  geom_point() + 
+  geom_smooth(method = "lm") +
+  geom_hline(yintercept = 0) +
+  geom_hline(yintercept = 2, color = "red") +
+  geom_hline(yintercept = -2, color = "red") +
+  labs(title = "Distribution of residues", x = "Fitted resid.", y = "Standart. resid.")
+
+plot1 <- ggplot(mod_8_diag, aes(x = 1:nrow(mod_8_diag), y = .cooksd)) + 
+  geom_bar(stat = "identity") + 
+  geom_hline(yintercept = 2, color = "red") + 
+  labs(title = "Cook's distance graph", x = "Observations", y = "Cook's dist.")
+# plot2 <- qqPlot(mod_8$residuals)
+plot2 <- ggplot(mod_8, aes(sample=mod$residuals))+stat_qq() + labs(title = "Distribution (quantile-quantile plot)")
+plot_grid(gg_resid, plot1, plot2)
+
+corr_matrix<-cor(df_scale[, c(1,5,6, 9,10, 12)])
+corrplot(corr_matrix, type="upper", title = "Correlations")
+vi <- vif(mod)
+```
+
+```{r,  echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+res_1 <- gg_resid + aes(x = zn)
+res_2 <- gg_resid + aes(x = indus)
+res_3 <- gg_resid + aes(x = nox)
+res_4 <- gg_resid + aes(x = dis)
+res_5 <- gg_resid + aes(x = tax)
+res_6 <- gg_resid + aes(x = lstat)
+
+plot_grid(res_1, res_2,  nrow = 1)
+plot_grid(res_3, res_5, nrow = 1)
+plot_grid(res_4, res_6, nrow = 1)
+
+```
+
+We noticed that the residuals from lstat and dis are the most explicit. We put them back in the model.
+
+
+```{r,  echo=FALSE, warning=FALSE, error = FALSE, message=FALSE, results="hide"}
+mod_8<-update(mod_8, .~. + lstat + dis)
+drop1(mod_8, test = "F")
+coef <- mod_8$coefficients
+```
+
+```{r,  echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+summary(mod_8)
+```
+
+Now model is: medv = `r coef[1]` + crim * (`r coef[2]`) + rm * (`r coef[3]`) + age* (`r coef[4]`) + ptratio* (`r coef[5]`) + black * (`r coef[6]`) + chas * (`r coef[7]`) + lstat* (`r coef[8]`) + dis* (`r coef[9]`)
+
+We diagnosed it again.
+
+```{r,  echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+mod_8_diag <- data.frame(fortify(mod_8), df_scale[, c(2:4, 8, 14)])
+
+gg_resid <- ggplot(data = mod_8_diag, aes(x = .fitted, y = .stdresid)) + 
+  geom_point() + 
+  geom_smooth(method = "lm") +
+  geom_hline(yintercept = 0) +
+  geom_hline(yintercept = 2, color = "red") +
+  geom_hline(yintercept = -2, color = "red") +
+  labs(title = "Distribution of residues", x = "Fitted resid.", y = "Standart. resid.")
+
+plot1 <- ggplot(mod_8_diag, aes(x = 1:nrow(mod_8_diag), y = .cooksd)) + 
+  geom_bar(stat = "identity") + 
+  geom_hline(yintercept = 2, color = "red") + 
+  labs(title = "Cook's distance graph", x = "Observations", y = "Cook's dist.")
+plot2 <- qqPlot(mod_8$residuals)
+plot2 <- ggplot(mod_8, aes(sample=mod$residuals))+stat_qq() + labs(title = "Distribution (quantile-quantile plot)")
+plot_grid(gg_resid, plot1)
+```
+
+
+
+```{r,  echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+
+res_1 <- gg_resid + aes(x = zn)
+res_2 <- gg_resid + aes(x = indus)
+res_3 <- gg_resid + aes(x = nox)
+res_5 <- gg_resid + aes(x = tax)
+plot_grid(res_1, res_2,  nrow = 1)
+plot_grid(res_3, res_5, nrow = 1)
+```
+
+# Final model
+
+As we remember from EDA lstat var is not linear so we can use squared lstat for better fit.
+
+That is our final model:
+
+```{r,  echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+mod_8 <- lm(medv~.-age-indus+I(lstat^2) - rad,data=df_scale)
+summary(mod_8)
+```
+
+R-squared and adjusted R-squared are bigger then in previous model.
+
+But still we need to diagnoste it.
+
+```{r,  echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+mod_8_diag <- data.frame(fortify(mod_8), df_scale[, c(2:4, 8, 14)])
+
+gg_resid <- ggplot(data = mod_8_diag, aes(x = .fitted, y = .stdresid)) + 
+  geom_point() + 
+  geom_smooth(method = "lm") +
+  geom_hline(yintercept = 0) +
+  geom_hline(yintercept = 2, color = "red") +
+  geom_hline(yintercept = -2, color = "red") +
+  labs(title = "Distribution of residues", x = "Fitted resid.", y = "Standart. resid.")
+
+plot1 <- ggplot(mod_8_diag, aes(x = 1:nrow(mod_8_diag), y = .cooksd)) + 
+  geom_bar(stat = "identity") + 
+  geom_hline(yintercept = 2, color = "red") + 
+  labs(title = "Cook's distance graph", x = "Observations", y = "Cook's dist.")
+plot2 <- qqPlot(mod_8$residuals)
+plot2 <- ggplot(mod_8, aes(sample=mod$residuals))+stat_qq() + labs(title = "Distribution (quantile-quantile plot)")
+plot_grid(gg_resid, plot1)
+```
+
+Now distribution of residuals looks better. And quantile-quantile plot too.
+
+Nice.
+
+```{r,  echo=FALSE, warning=FALSE, error = FALSE, message=FALSE}
+
+res_1 <- gg_resid + aes(x = zn)
+res_2 <- gg_resid + aes(x = indus)
+res_3 <- gg_resid + aes(x = nox)
+res_5 <- gg_resid + aes(x = tax)
+plot_grid(res_1, res_2,  nrow = 1)
+plot_grid(res_3, res_5, nrow = 1)
+```
+
+Also residuals distributions of the out of the model predictors are quite good now.
+
+# Conclusion
+
+We can conclude that there is no reason trying to optimize this model again. 
+
+Since there is no simple observable linear relationship in the data, we cannot build an optimal adequate and good model.
+
+Despite the fact that we have selected a good model compared to the previous ones, we consider it is dangerous to make predictions of the houses costs based on it because of the possibility of obtaining incorrect results. 
+
+That is why we did not built a graf of the predictions of the medv value.
+
+But other methods still can be used to parse this dataset, such as the principal component analysis for example.
